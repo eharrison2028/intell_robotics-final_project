@@ -1,0 +1,32 @@
+[1.351s] Invoking command in '/home/eharriso1/project_ws/src/edubot_auto_cars': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/eharriso1/project_ws/build/edubot_auto_cars/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/edubot_auto_cars build --build-base /home/eharriso1/project_ws/build/edubot_auto_cars/build install --record /home/eharriso1/project_ws/build/edubot_auto_cars/install.log --single-version-externally-managed install_data
+[1.631s] running egg_info
+[1.631s] creating ../../build/edubot_auto_cars/edubot_auto_cars.egg-info
+[1.648s] writing ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/PKG-INFO
+[1.649s] writing dependency_links to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/dependency_links.txt
+[1.649s] writing requirements to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/requires.txt
+[1.650s] writing top-level names to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/top_level.txt
+[1.650s] writing manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+[1.688s] reading manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+[1.688s] writing manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+[1.688s] running build
+[1.689s] running build_py
+[1.689s] creating /home/eharriso1/project_ws/build/edubot_auto_cars/build
+[1.689s] creating /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib
+[1.689s] creating /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars
+[1.690s] copying edubot_auto_cars/__init__.py -> /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars
+[1.690s] running install
+[1.696s] running install_lib
+[1.715s] creating /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars
+[1.715s] copying /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars/__init__.py -> /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars
+[1.716s] byte-compiling /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars/__init__.py to __init__.cpython-312.pyc
+[1.717s] running install_data
+[1.717s] creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index
+[1.717s] creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index
+[1.718s] creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index/packages
+[1.718s] copying resource/edubot_auto_cars -> /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index/packages
+[1.718s] copying package.xml -> /home/eharriso1/project_ws/install/edubot_auto_cars/share/edubot_auto_cars
+[1.719s] running install_egg_info
+[1.742s] Copying ../../build/edubot_auto_cars/edubot_auto_cars.egg-info to /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars-0.0.0-py3.12.egg-info
+[1.743s] running install_scripts
+[1.896s] writing list of installed files to '/home/eharriso1/project_ws/build/edubot_auto_cars/install.log'
+[1.949s] Invoked command in '/home/eharriso1/project_ws/src/edubot_auto_cars' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/eharriso1/project_ws/build/edubot_auto_cars/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py egg_info --egg-base ../../build/edubot_auto_cars build --build-base /home/eharriso1/project_ws/build/edubot_auto_cars/build install --record /home/eharriso1/project_ws/build/edubot_auto_cars/install.log --single-version-externally-managed install_data

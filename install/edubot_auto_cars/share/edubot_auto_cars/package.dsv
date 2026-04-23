@@ -1,0 +1,6 @@
+source;share/edubot_auto_cars/hook/pythonpath.ps1
+source;share/edubot_auto_cars/hook/pythonpath.dsv
+source;share/edubot_auto_cars/hook/pythonpath.sh
+source;share/edubot_auto_cars/hook/ament_prefix_path.ps1
+source;share/edubot_auto_cars/hook/ament_prefix_path.dsv
+source;share/edubot_auto_cars/hook/ament_prefix_path.sh

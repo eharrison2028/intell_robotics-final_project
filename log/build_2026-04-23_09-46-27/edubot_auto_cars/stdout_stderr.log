@@ -1,0 +1,30 @@
+running egg_info
+creating ../../build/edubot_auto_cars/edubot_auto_cars.egg-info
+writing ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/PKG-INFO
+writing dependency_links to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/dependency_links.txt
+writing requirements to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/requires.txt
+writing top-level names to ../../build/edubot_auto_cars/edubot_auto_cars.egg-info/top_level.txt
+writing manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+reading manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+writing manifest file '../../build/edubot_auto_cars/edubot_auto_cars.egg-info/SOURCES.txt'
+running build
+running build_py
+creating /home/eharriso1/project_ws/build/edubot_auto_cars/build
+creating /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib
+creating /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars
+copying edubot_auto_cars/__init__.py -> /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars
+running install
+running install_lib
+creating /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars
+copying /home/eharriso1/project_ws/build/edubot_auto_cars/build/lib/edubot_auto_cars/__init__.py -> /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars
+byte-compiling /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars/__init__.py to __init__.cpython-312.pyc
+running install_data
+creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index
+creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index
+creating /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index/packages
+copying resource/edubot_auto_cars -> /home/eharriso1/project_ws/install/edubot_auto_cars/share/ament_index/resource_index/packages
+copying package.xml -> /home/eharriso1/project_ws/install/edubot_auto_cars/share/edubot_auto_cars
+running install_egg_info
+Copying ../../build/edubot_auto_cars/edubot_auto_cars.egg-info to /home/eharriso1/project_ws/install/edubot_auto_cars/lib/python3.12/site-packages/edubot_auto_cars-0.0.0-py3.12.egg-info
+running install_scripts
+writing list of installed files to '/home/eharriso1/project_ws/build/edubot_auto_cars/install.log'
