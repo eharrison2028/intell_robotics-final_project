@@ -24,7 +24,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lane_detector_threshold = edubot_auto_cars.lane_detector_threshold:main'
+            'lane_detector_threshold = edubot_auto_cars.lane_detector_threshold:main',
+            'mapping = edubot_auto_cars.mapping:main'
         ],
     },
 )

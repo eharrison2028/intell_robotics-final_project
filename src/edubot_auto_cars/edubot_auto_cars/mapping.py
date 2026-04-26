@@ -15,6 +15,8 @@ import numpy as np
 import math
 import time
 
+from rclpy.qos import qos_profile_sensor_data
+
 
 try:
    from tf2_ros import TransformBroadcaster, Buffer, TransformListener
@@ -97,9 +99,9 @@ class RoadMapper(Node):
    def __init__(self):
        super().__init__('road_mapper')
 
-
+        
        # ---- Parameters ----
-       self.declare_parameter('image_topic',        '/camera/image_raw')
+       self.declare_parameter('image_topic',        '/camera_2/image_raw')
        self.declare_parameter('scan_topic',         '/scan')
        self.declare_parameter('map_topic',          '/road_map')
        self.declare_parameter('marker_topic',       '/road_markers')
@@ -191,11 +193,25 @@ class RoadMapper(Node):
        image_topic = self.get_parameter('image_topic').value
        scan_topic  = self.get_parameter('scan_topic').value
 
-
+       '''
        self.image_sub = self.create_subscription(
            Image, image_topic, self.image_callback, 10)
        self.scan_sub  = self.create_subscription(
            LaserScan, scan_topic, self.scan_callback, 10)
+        '''
+       self.image_sub = self.create_subscription(
+           Image,
+           image_topic,
+           self.image_callback,
+           qos_profile_sensor_data
+       )
+
+       self.scan_sub = self.create_subscription(
+           LaserScan,
+           scan_topic,
+           self.scan_callback,
+           qos_profile_sensor_data
+       )
 
 
        # Optional odometry for robot pose
@@ -339,51 +355,36 @@ class RoadMapper(Node):
 
 
            for cnt in contours:
-               area = cv2.contourArea(cnt)
-               if area < min_area:
-                   continue
+            area = cv2.contourArea(cnt)
+            if area < min_area:
+                continue
 
+            # Get bounding box of contour
+            x, y, bw, bh = cv2.boundingRect(cnt)
 
-               M = cv2.moments(cnt)
-               if M['m00'] == 0:
-                   continue
+            # Sample a thin vertical centerline
+            cx_px = x + bw // 2
 
+            sample_step = 6  # adjust if needed
 
-               cx_px = int(M['m10'] / M['m00'])
-               cy_px = int(M['m01'] / M['m00']) + y1   # back to full-frame y
+            for yy in range(y, y + bh, sample_step):
+                px = cx_px
+                py = yy + y1  # convert ROI → full image
 
+                wx, wy = self._pixel_to_world(px, py, w, h)
 
-               wx, wy = self._pixel_to_world(cx_px, cy_px, w, h)
+                if colour == 'orange':
+                    self.end_of_road_detected = True
+                    self._mark_grid(wx, wy, occupied=True)
+                    self._add_lane_marker(wx, wy, colour)
 
+                elif colour == 'white':
+                    self._mark_grid(wx, wy, occupied=True)
+                    self._add_lane_marker(wx, wy, colour)
 
-               if colour == 'orange':
-                   self.end_of_road_detected = True
-                   self._add_lane_marker(wx, wy, colour)
-                   self._mark_grid(wx, wy, occupied=True)
-               elif colour == 'white':
-                   self._mark_grid(wx, wy, occupied=True)
-                   self._add_lane_marker(wx, wy, colour)
-               elif colour == 'yellow':
-                   self._add_lane_marker(wx, wy, colour)
-                   # Yellow centre dashes: mark as free road surface
-                   self._mark_grid(wx, wy, occupied=False)
-
-
-       if self.get_parameter('show_debug_windows').value:
-           debug = frame.copy()
-           colour_bgr = {
-               'white':  (255, 255, 255),
-               'yellow': (0, 215, 255),
-               'orange': (0, 165, 255),
-           }
-           for colour, mask in masks.items():
-               cleaned  = self._morph_clean(mask)
-               contours, _ = cv2.findContours(
-                   cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-               cv2.drawContours(debug[y1:], contours, -1, colour_bgr[colour], 2)
-           cv2.imshow('RoadMapper – Lane Debug', debug)
-           cv2.waitKey(1)
-
+                elif colour == 'yellow':
+                    self._mark_grid(wx, wy, occupied=True)
+                    self._add_lane_marker(wx, wy, colour)
 
    # -----------------------------------------------------------------------
    # Map + marker publishing
@@ -638,10 +639,11 @@ class RoadMapper(Node):
 
 
    def _mark_grid(self, wx: float, wy: float, occupied: bool):
-       col = int(wx / self.resolution)
-       row = int(wy / self.resolution)
-       if 0 <= row < self.map_h_cells and 0 <= col < self.map_w_cells:
-           self.grid[row, col] = OCCUPANCY_OCC if occupied else OCCUPANCY_FREE
+    col = int(wx / self.resolution)
+    row = int(wy / self.resolution)
+
+    if 0 <= row < self.map_h_cells and 0 <= col < self.map_w_cells:
+        self.grid[row, col] = OCCUPANCY_OCC if occupied else OCCUPANCY_FREE
 
 
    def _add_lane_marker(self, wx: float, wy: float, colour: str):
