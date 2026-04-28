@@ -1,353 +1,282 @@
+import time
+import math
+
 import rclpy
 from rclpy.node import Node
-
-from sensor_msgs.msg import Image
-from std_msgs.msg import Float32
+from sensor_msgs.msg import Image, LaserScan
+from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 
 import cv2
 import numpy as np
 
 
-class LaneDetectorNode(Node):
+class LaneFollower(Node):
     def __init__(self):
-        super().__init__('lane_detector_node')
-
-        # ---------------- Parameters ----------------
-        self.declare_parameter('image_topic', '/camera/image_raw')
-        self.declare_parameter('debug_image_topic', '/lane/debug_image')
-        self.declare_parameter('lane_offset_topic', '/lane/offset')
-
-        # ROI: lower part of image
-        self.declare_parameter('roi_y_start_ratio', 0.55)
-        self.declare_parameter('roi_y_end_ratio', 1.0)
-
-        # White mask HSV thresholds
-        self.declare_parameter('white_h_min', 0)
-        self.declare_parameter('white_h_max', 179)
-        self.declare_parameter('white_s_min', 0)
-        self.declare_parameter('white_s_max', 80)
-        self.declare_parameter('white_v_min', 180)
-        self.declare_parameter('white_v_max', 255)
-
-        # Yellow mask HSV thresholds
-        self.declare_parameter('yellow_h_min', 15)
-        self.declare_parameter('yellow_h_max', 40)
-        self.declare_parameter('yellow_s_min', 80)
-        self.declare_parameter('yellow_s_max', 255)
-        self.declare_parameter('yellow_v_min', 100)
-        self.declare_parameter('yellow_v_max', 255)
-
-        # Contour filtering
-        self.declare_parameter('min_contour_area_white', 250.0)
-        self.declare_parameter('min_contour_area_yellow', 120.0)
-
-        # Morphology
-        self.declare_parameter('erode_iterations', 1)
-        self.declare_parameter('dilate_iterations', 2)
-
-        # Lane geometry
-        # Used when only one boundary is visible.
-        self.declare_parameter('estimated_lane_width_ratio', 0.35)
-
-        # Smoothing
-        self.declare_parameter('smoothing_alpha', 0.3)
-
-        # Visualization
-        self.declare_parameter('show_debug_windows', False)
-
-        image_topic = self.get_parameter('image_topic').value
-        debug_image_topic = self.get_parameter('debug_image_topic').value
-        lane_offset_topic = self.get_parameter('lane_offset_topic').value
+        super().__init__('lane_follower')
 
         self.bridge = CvBridge()
 
+        # ---------------- Topics ----------------
+        self.declare_parameter('image_topic', '/camera_2/image_raw')
+        self.declare_parameter('lidar_topic', '/scan')
+        self.declare_parameter('cmd_vel_topic', '/cmd_vel')
+        self.declare_parameter('debug_image_topic', '/lane/debug_image')
+
+        # ---------------- Conservative driving ----------------
+        self.declare_parameter('forward_speed', 0.055)
+        self.declare_parameter('turn_gain', 0.12)
+        self.declare_parameter('max_angular_speed', 0.16)
+        self.declare_parameter('steering_sign', 1.0)
+
+        # ---------------- Right white-line following ----------------
+        self.declare_parameter('desired_right_line_offset_ratio', 0.24)
+        self.declare_parameter('smoothing_alpha', 0.12)
+
+        # ---------------- Hard white boundary behavior ----------------
+        self.declare_parameter('white_boundary_danger_ratio', 0.58)
+        self.declare_parameter('white_boundary_warning_ratio', 0.68)
+        self.declare_parameter('white_boundary_no_right_turn_ratio', 0.75)
+        self.declare_parameter('white_boundary_escape_turn', 0.22)
+        self.declare_parameter('white_boundary_warning_turn', 0.16)
+        self.declare_parameter('white_boundary_warning_speed', 0.025)
+
+        # ---------------- ROI ----------------
+        self.declare_parameter('roi_y_start_ratio', 0.58)
+        self.declare_parameter('roi_y_end_ratio', 1.0)
+
+        # ---------------- White tape HSV ----------------
+        self.declare_parameter('white_h_min', 0)
+        self.declare_parameter('white_h_max', 179)
+        self.declare_parameter('white_s_min', 0)
+        self.declare_parameter('white_s_max', 90)
+        self.declare_parameter('white_v_min', 150)
+        self.declare_parameter('white_v_max', 255)
+
+        # ---------------- Yellow tape HSV ----------------
+        self.declare_parameter('yellow_h_min', 15)
+        self.declare_parameter('yellow_h_max', 40)
+        self.declare_parameter('yellow_s_min', 70)
+        self.declare_parameter('yellow_s_max', 255)
+        self.declare_parameter('yellow_v_min', 90)
+        self.declare_parameter('yellow_v_max', 255)
+
+        # ---------------- Orange turnaround line HSV ----------------
+        self.declare_parameter('orange_h_min', 5)
+        self.declare_parameter('orange_h_max', 18)
+        self.declare_parameter('orange_s_min', 90)
+        self.declare_parameter('orange_s_max', 255)
+        self.declare_parameter('orange_v_min', 100)
+        self.declare_parameter('orange_v_max', 255)
+        self.declare_parameter('orange_area_ratio_trigger', 0.04)
+
+        # ---------------- Contour filtering ----------------
+        self.declare_parameter('min_white_area', 180.0)
+        self.declare_parameter('min_yellow_area', 90.0)
+
+        # ---------------- Obstacle behavior ----------------
+        self.declare_parameter('use_lidar_obstacle', False)
+        self.declare_parameter('obstacle_stop_distance', 0.45)
+        self.declare_parameter('front_lidar_degrees', 25.0)
+
+        # ---------------- Turnaround behavior ----------------
+        self.declare_parameter('turnaround_angular_speed', 0.45)
+        self.declare_parameter('turnaround_duration', 3.2)
+        self.declare_parameter('turnaround_cooldown', 4.0)
+
+        # ---------------- Debug ----------------
+        self.declare_parameter('show_debug_windows', False)
+
         self.image_sub = self.create_subscription(
             Image,
-            image_topic,
+            self.get_parameter('image_topic').value,
             self.image_callback,
             10
         )
 
-        self.debug_pub = self.create_publisher(Image, debug_image_topic, 10)
-        self.offset_pub = self.create_publisher(Float32, lane_offset_topic, 10)
+        self.lidar_sub = self.create_subscription(
+            LaserScan,
+            self.get_parameter('lidar_topic').value,
+            self.lidar_callback,
+            10
+        )
 
-        # Smoothed state
-        self.prev_lane_center_x = None
-        self.prev_lane_offset = 0.0
+        self.cmd_pub = self.create_publisher(
+            Twist,
+            self.get_parameter('cmd_vel_topic').value,
+            10
+        )
 
-        self.get_logger().info(f'Lane detector listening on {image_topic}')
+        self.debug_pub = self.create_publisher(
+            Image,
+            self.get_parameter('debug_image_topic').value,
+            10
+        )
 
-    def image_callback(self, msg: Image):
+        self.prev_target_x = None
+        self.obstacle_detected = False
+
+        self.turning_around = False
+        self.turnaround_start_time = 0.0
+        self.last_turnaround_time = 0.0
+
+        self.last_warn_times = {}
+
+        self.get_logger().info('Lane follower started with hard white-line boundary behavior.')
+
+    def image_callback(self, msg):
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
         except Exception as e:
-            self.get_logger().error(f'cv_bridge conversion failed: {e}')
+            self.get_logger().error(f'cv_bridge error: {e}')
             return
 
-        debug_frame, lane_offset = self.process_frame(frame)
+        state = self.process_image(frame)
+        cmd = self.compute_command(state)
 
-        offset_msg = Float32()
-        offset_msg.data = float(lane_offset)
-        self.offset_pub.publish(offset_msg)
+        self.cmd_pub.publish(cmd)
+        self.publish_debug(state, cmd)
 
-        try:
-            debug_msg = self.bridge.cv2_to_imgmsg(debug_frame, encoding='bgr8')
-            self.debug_pub.publish(debug_msg)
-        except Exception as e:
-            self.get_logger().error(f'Failed to publish debug image: {e}')
+    def lidar_callback(self, msg):
+        if not self.get_parameter('use_lidar_obstacle').value:
+            self.obstacle_detected = False
+            return
 
-        if self.get_parameter('show_debug_windows').value:
-            cv2.imshow('Lane Debug', debug_frame)
-            cv2.waitKey(1)
+        ranges = np.array(msg.ranges, dtype=np.float32)
+        ranges = np.where(np.isfinite(ranges), ranges, 10.0)
 
-    def process_frame(self, frame):
+        front_ranges = []
+        front_deg = float(self.get_parameter('front_lidar_degrees').value)
+
+        for i, distance in enumerate(ranges):
+            angle = msg.angle_min + i * msg.angle_increment
+            if abs(math.degrees(angle)) <= front_deg:
+                front_ranges.append(distance)
+
+        if len(front_ranges) == 0:
+            self.obstacle_detected = False
+            return
+
+        self.obstacle_detected = (
+            min(front_ranges) < float(self.get_parameter('obstacle_stop_distance').value)
+        )
+
+    def process_image(self, frame):
         h, w, _ = frame.shape
-        debug_frame = frame.copy()
 
-        # ---------------- ROI ----------------
-        y_start_ratio = self.get_parameter('roi_y_start_ratio').value
-        y_end_ratio = self.get_parameter('roi_y_end_ratio').value
-
-        y1 = int(h * y_start_ratio)
-        y2 = int(h * y_end_ratio)
+        y1 = int(h * float(self.get_parameter('roi_y_start_ratio').value))
+        y2 = int(h * float(self.get_parameter('roi_y_end_ratio').value))
 
         roi = frame[y1:y2, :].copy()
-        roi_debug = roi.copy()
-
         roi_h, roi_w, _ = roi.shape
         mid_x = roi_w // 2
 
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-        # ---------------- White mask ----------------
-        white_lower = np.array([
-            self.get_parameter('white_h_min').value,
-            self.get_parameter('white_s_min').value,
-            self.get_parameter('white_v_min').value
-        ], dtype=np.uint8)
-
-        white_upper = np.array([
-            self.get_parameter('white_h_max').value,
-            self.get_parameter('white_s_max').value,
-            self.get_parameter('white_v_max').value
-        ], dtype=np.uint8)
-
-        white_mask = cv2.inRange(hsv, white_lower, white_upper)
-
-        # ---------------- Yellow mask ----------------
-        yellow_lower = np.array([
-            self.get_parameter('yellow_h_min').value,
-            self.get_parameter('yellow_s_min').value,
-            self.get_parameter('yellow_v_min').value
-        ], dtype=np.uint8)
-
-        yellow_upper = np.array([
-            self.get_parameter('yellow_h_max').value,
-            self.get_parameter('yellow_s_max').value,
-            self.get_parameter('yellow_v_max').value
-        ], dtype=np.uint8)
-
-        yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
-
-        # ---------------- Morphological cleanup ----------------
-        erode_iterations = self.get_parameter('erode_iterations').value
-        dilate_iterations = self.get_parameter('dilate_iterations').value
-        kernel = np.ones((5, 5), np.uint8)
-
-        white_mask = cv2.erode(white_mask, kernel, iterations=erode_iterations)
-        white_mask = cv2.dilate(white_mask, kernel, iterations=dilate_iterations)
-
-        yellow_mask = cv2.erode(yellow_mask, kernel, iterations=erode_iterations)
-        yellow_mask = cv2.dilate(yellow_mask, kernel, iterations=dilate_iterations)
-
-        # ---------------- Find contours ----------------
-        white_contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        yellow_contours, _ = cv2.findContours(yellow_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Right boundary: prefer white contour on right side
-        right_centroid = self.find_best_contour_centroid(
-            contours=white_contours,
-            min_area=self.get_parameter('min_contour_area_white').value,
-            image_width=roi_w,
-            prefer='right'
+        white_mask = self.make_mask(
+            hsv,
+            'white_h_min', 'white_s_min', 'white_v_min',
+            'white_h_max', 'white_s_max', 'white_v_max'
         )
 
-        # Left divider: prefer yellow contour on left side
-        left_centroid = self.find_best_contour_centroid(
-            contours=yellow_contours,
-            min_area=self.get_parameter('min_contour_area_yellow').value,
-            image_width=roi_w,
-            prefer='left'
+        yellow_mask = self.make_mask(
+            hsv,
+            'yellow_h_min', 'yellow_s_min', 'yellow_v_min',
+            'yellow_h_max', 'yellow_s_max', 'yellow_v_max'
         )
 
-        # Fallback: if no yellow left divider is found, allow white on left
-        # for paths where both sides are white.
-        left_source = 'yellow'
-        if left_centroid is None:
-            left_centroid = self.find_best_contour_centroid(
-                contours=white_contours,
-                min_area=self.get_parameter('min_contour_area_white').value,
-                image_width=roi_w,
-                prefer='left'
+        orange_mask = self.make_mask(
+            hsv,
+            'orange_h_min', 'orange_s_min', 'orange_v_min',
+            'orange_h_max', 'orange_s_max', 'orange_v_max'
+        )
+
+        white_mask = self.clean_mask(white_mask)
+        yellow_mask = self.clean_mask(yellow_mask)
+        orange_mask = self.clean_mask(orange_mask)
+
+        right_white = self.find_best_right_white(white_mask)
+        yellow_left = self.find_best_yellow_left(yellow_mask)
+
+        orange_area_ratio = cv2.countNonZero(orange_mask) / float(roi_w * roi_h)
+        orange_detected = orange_area_ratio > float(
+            self.get_parameter('orange_area_ratio_trigger').value
+        )
+
+        line_found = right_white is not None
+        target_x = None
+        error = 0.0
+
+        if line_found:
+            desired_offset = int(
+                roi_w * float(self.get_parameter('desired_right_line_offset_ratio').value)
             )
-            if left_centroid is not None:
-                left_source = 'white'
 
-        # ---------------- Draw guide line ----------------
-        cv2.line(roi_debug, (mid_x, 0), (mid_x, roi_h), (255, 0, 0), 2)
+            raw_target_x = right_white['x'] - desired_offset
+            raw_target_x = max(0, min(roi_w - 1, raw_target_x))
 
-        # ---------------- Lane center logic ----------------
-        lane_center_x = None
-        estimated_lane_width = int(roi_w * self.get_parameter('estimated_lane_width_ratio').value)
-        confidence = 0
-
-        if right_centroid is not None:
-            confidence += 1
-        if left_centroid is not None:
-            confidence += 1
-
-        # Best case: both visible
-        if right_centroid is not None and left_centroid is not None:
-            lane_center_x = int((right_centroid[0] + left_centroid[0]) / 2)
-
-        # Primary mode: right boundary visible
-        elif right_centroid is not None:
-            lane_center_x = right_centroid[0] - estimated_lane_width
-
-        # Fallback only: left visible
-        elif left_centroid is not None:
-            lane_center_x = left_centroid[0] + estimated_lane_width
-
-        # Nothing visible: hold previous estimate if available
-        else:
-            if self.prev_lane_center_x is not None:
-                lane_center_x = self.prev_lane_center_x
-
-        # ---------------- Smoothing ----------------
-        if lane_center_x is not None:
-            if self.prev_lane_center_x is None:
-                smoothed_lane_center_x = lane_center_x
+            if self.prev_target_x is None:
+                target_x = raw_target_x
             else:
-                alpha = self.get_parameter('smoothing_alpha').value
-                smoothed_lane_center_x = int(
-                    (1.0 - alpha) * self.prev_lane_center_x + alpha * lane_center_x
-                )
+                alpha = float(self.get_parameter('smoothing_alpha').value)
+                target_x = int((1.0 - alpha) * self.prev_target_x + alpha * raw_target_x)
 
-            self.prev_lane_center_x = smoothed_lane_center_x
+            self.prev_target_x = target_x
+            error = float(target_x - mid_x) / float(mid_x)
         else:
-            smoothed_lane_center_x = None
+            self.prev_target_x = None
 
-        # ---------------- Compute offset ----------------
-        if smoothed_lane_center_x is not None:
-            lane_offset_pixels = smoothed_lane_center_x - mid_x
-            lane_offset = lane_offset_pixels / float(mid_x)
-            self.prev_lane_offset = lane_offset
-        else:
-            lane_offset = self.prev_lane_offset
+        return {
+            'frame': frame,
+            'roi': roi,
+            'roi_y1': y1,
+            'roi_y2': y2,
+            'roi_h': roi_h,
+            'roi_w': roi_w,
+            'mid_x': mid_x,
+            'white_mask': white_mask,
+            'yellow_mask': yellow_mask,
+            'orange_mask': orange_mask,
+            'right_white': right_white,
+            'yellow_left': yellow_left,
+            'target_x': target_x,
+            'error': error,
+            'line_found': line_found,
+            'orange_detected': orange_detected,
+            'orange_area_ratio': orange_area_ratio,
+        }
 
-        # ---------------- Draw results ----------------
-        if left_centroid is not None:
-            left_color = (0, 255, 255) if left_source == 'yellow' else (255, 255, 255)
-            cv2.circle(roi_debug, left_centroid, 8, left_color, -1)
-            cv2.putText(
-                roi_debug,
-                f'L ({left_source})',
-                (left_centroid[0] + 10, max(20, left_centroid[1])),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                left_color,
-                2
-            )
+    def make_mask(self, hsv, hmin, smin, vmin, hmax, smax, vmax):
+        lower = np.array([
+            self.get_parameter(hmin).value,
+            self.get_parameter(smin).value,
+            self.get_parameter(vmin).value
+        ], dtype=np.uint8)
 
-        if right_centroid is not None:
-            cv2.circle(roi_debug, right_centroid, 8, (0, 0, 255), -1)
-            cv2.putText(
-                roi_debug,
-                'R (white)',
-                (right_centroid[0] + 10, max(20, right_centroid[1])),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 0, 255),
-                2
-            )
+        upper = np.array([
+            self.get_parameter(hmax).value,
+            self.get_parameter(smax).value,
+            self.get_parameter(vmax).value
+        ], dtype=np.uint8)
 
-        if smoothed_lane_center_x is not None:
-            cv2.circle(roi_debug, (smoothed_lane_center_x, roi_h // 2), 8, (0, 255, 0), -1)
-            cv2.line(
-                roi_debug,
-                (smoothed_lane_center_x, 0),
-                (smoothed_lane_center_x, roi_h),
-                (0, 255, 0),
-                2
-            )
-        else:
-            cv2.putText(
-                roi_debug,
-                'NO LANE ESTIMATE',
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
-                (0, 0, 255),
-                2
-            )
+        return cv2.inRange(hsv, lower, upper)
 
-        # Draw estimated offset text
-        cv2.putText(
-            roi_debug,
-            f'offset: {lane_offset:+.3f}',
-            (20, roi_h - 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.75,
-            (255, 255, 255),
-            2
-        )
+    def clean_mask(self, mask):
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        return mask
 
-        cv2.putText(
-            roi_debug,
-            f'confidence: {confidence}/2',
-            (20, roi_h - 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.75,
-            (255, 255, 255),
-            2
-        )
+    def find_best_right_white(self, mask):
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        h, w = mask.shape
 
-        # ---------------- Mask previews ----------------
-        white_mask_bgr = cv2.cvtColor(white_mask, cv2.COLOR_GRAY2BGR)
-        yellow_mask_bgr = cv2.cvtColor(yellow_mask, cv2.COLOR_GRAY2BGR)
-
-        preview_w = w // 4
-        preview_h = (y2 - y1) // 4
-
-        white_preview = cv2.resize(white_mask_bgr, (preview_w, preview_h))
-        yellow_preview = cv2.resize(yellow_mask_bgr, (preview_w, preview_h))
-
-        cv2.putText(white_preview, 'WHITE', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-        cv2.putText(yellow_preview, 'YELLOW', (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-        debug_frame[y1:y2, :] = roi_debug
-
-        # put previews in top-left
-        debug_frame[0:preview_h, 0:preview_w] = white_preview
-        debug_frame[0:preview_h, preview_w:2 * preview_w] = yellow_preview
-
-        return debug_frame, lane_offset
-
-    def find_best_contour_centroid(self, contours, min_area, image_width, prefer='left'):
-        """
-        Selects a contour centroid using a simple score:
-        - prefers larger contour area
-        - prefers the requested side of the image
-
-        prefer = 'left' or 'right'
-        """
-        best_centroid = None
-        best_score = -1e9
+        best = None
+        best_score = -1.0
 
         for contour in contours:
             area = cv2.contourArea(contour)
-            if area < min_area:
+            if area < float(self.get_parameter('min_white_area').value):
                 continue
 
             M = cv2.moments(contour)
@@ -357,41 +286,278 @@ class LaneDetectorNode(Node):
             cx = int(M['m10'] / M['m00'])
             cy = int(M['m01'] / M['m00'])
 
-            # Larger contours are preferred
-            score = area
+            # Only accept likely right-side white tape.
+            if cx < int(0.40 * w):
+                continue
 
-            # Add side preference
-            if prefer == 'left':
-                # smaller cx is better
-                score += (image_width - cx) * 0.5
-            elif prefer == 'right':
-                # larger cx is better
-                score += cx * 0.5
-
-            # Slightly prefer contours lower in image (closer to robot)
-            score += cy * 0.2
+            score = area + 1.0 * cx + 0.4 * cy
 
             if score > best_score:
                 best_score = score
-                best_centroid = (cx, cy)
+                best = {'x': cx, 'y': cy, 'area': area}
 
-        return best_centroid
+        return best
+
+    def find_best_yellow_left(self, mask):
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        h, w = mask.shape
+
+        best = None
+        best_score = -1.0
+
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < float(self.get_parameter('min_yellow_area').value):
+                continue
+
+            M = cv2.moments(contour)
+            if M['m00'] == 0:
+                continue
+
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+
+            score = area + 1.0 * (w - cx) + 0.3 * cy
+
+            if score > best_score:
+                best_score = score
+                best = {'x': cx, 'y': cy, 'area': area}
+
+        return best
+
+    def compute_command(self, state):
+        cmd = Twist()
+        now = time.time()
+
+        should_turnaround = state['orange_detected'] or self.obstacle_detected
+
+        if should_turnaround and not self.turning_around:
+            if now - self.last_turnaround_time > float(self.get_parameter('turnaround_cooldown').value):
+                self.turning_around = True
+                self.turnaround_start_time = now
+                self.last_turnaround_time = now
+                self.get_logger().info('Turnaround triggered.')
+
+        if self.turning_around:
+            elapsed = now - self.turnaround_start_time
+
+            if elapsed < float(self.get_parameter('turnaround_duration').value):
+                cmd.linear.x = 0.0
+                cmd.angular.z = float(self.get_parameter('turnaround_angular_speed').value)
+                return cmd
+
+            self.turning_around = False
+            self.prev_target_x = None
+            self.get_logger().info('Turnaround complete.')
+
+        # If the white boundary is not detected, stop.
+        if not state['line_found'] or state['right_white'] is None:
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.0
+            self.warn_throttle(
+                'line_lost',
+                'Right white line lost. Stopping to avoid crossing boundary.',
+                1.0
+            )
+            return cmd
+
+        right_white_x = state['right_white']['x']
+        roi_w = state['roi_w']
+
+        danger_x = int(float(self.get_parameter('white_boundary_danger_ratio').value) * roi_w)
+        warning_x = int(float(self.get_parameter('white_boundary_warning_ratio').value) * roi_w)
+        no_right_turn_x = int(float(self.get_parameter('white_boundary_no_right_turn_ratio').value) * roi_w)
+
+        # HARD BOUNDARY:
+        # The right white line must remain far to the right.
+        # If it moves toward the center, stop forward motion and steer left.
+        if right_white_x < danger_x:
+            cmd.linear.x = 0.0
+            cmd.angular.z = abs(float(self.get_parameter('white_boundary_escape_turn').value))
+            self.warn_throttle(
+                'white_boundary_danger',
+                'WHITE LINE DANGER: stopping forward motion and steering left.',
+                0.5
+            )
+            return cmd
+
+        if right_white_x < warning_x:
+            cmd.linear.x = float(self.get_parameter('white_boundary_warning_speed').value)
+            cmd.angular.z = abs(float(self.get_parameter('white_boundary_warning_turn').value))
+            self.warn_throttle(
+                'white_boundary_warning',
+                'White line close. Correcting left.',
+                0.8
+            )
+            return cmd
+
+        # Normal right-white-line following.
+        error = state['error']
+
+        if abs(error) < 0.10:
+            error = 0.0
+
+        steering_sign = float(self.get_parameter('steering_sign').value)
+        turn_gain = float(self.get_parameter('turn_gain').value)
+
+        angular = steering_sign * turn_gain * error
+
+        max_ang = float(self.get_parameter('max_angular_speed').value)
+        angular = max(min(angular, max_ang), -max_ang)
+
+        # Extra safety: if close to the white line, do not allow right turns.
+        if right_white_x < no_right_turn_x and angular < 0.0:
+            angular = 0.0
+
+        cmd.linear.x = float(self.get_parameter('forward_speed').value)
+        cmd.angular.z = angular
+
+        return cmd
+
+    def publish_debug(self, state, cmd):
+        frame = state['frame'].copy()
+        roi = state['roi'].copy()
+
+        roi_h = state['roi_h']
+        roi_w = state['roi_w']
+        mid_x = state['mid_x']
+
+        danger_x = int(float(self.get_parameter('white_boundary_danger_ratio').value) * roi_w)
+        warning_x = int(float(self.get_parameter('white_boundary_warning_ratio').value) * roi_w)
+
+        cv2.line(roi, (mid_x, 0), (mid_x, roi_h), (255, 0, 0), 2)
+        cv2.line(roi, (danger_x, 0), (danger_x, roi_h), (0, 0, 255), 2)
+        cv2.line(roi, (warning_x, 0), (warning_x, roi_h), (0, 165, 255), 2)
+
+        if state['right_white'] is not None:
+            p = state['right_white']
+            cv2.circle(roi, (p['x'], p['y']), 8, (255, 255, 255), -1)
+            cv2.putText(
+                roi,
+                'RIGHT WHITE BOUNDARY',
+                (max(5, p['x'] - 220), max(25, p['y'])),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                2
+            )
+
+        if state['yellow_left'] is not None:
+            p = state['yellow_left']
+            cv2.circle(roi, (p['x'], p['y']), 8, (0, 255, 255), -1)
+            cv2.putText(
+                roi,
+                'YELLOW LEFT',
+                (p['x'] + 8, max(25, p['y'])),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                2
+            )
+
+        if state['target_x'] is not None:
+            cv2.line(roi, (state['target_x'], 0), (state['target_x'], roi_h), (0, 255, 0), 2)
+            cv2.putText(
+                roi,
+                'TARGET',
+                (state['target_x'] + 8, 35),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 0),
+                2
+            )
+
+        if self.turning_around:
+            status = 'TURNAROUND'
+        elif state['orange_detected']:
+            status = 'ORANGE DETECTED'
+        elif not state['line_found']:
+            status = 'STOPPED: NO WHITE BOUNDARY'
+        elif state['right_white']['x'] < danger_x:
+            status = 'WHITE DANGER'
+        elif state['right_white']['x'] < warning_x:
+            status = 'WHITE WARNING'
+        else:
+            status = 'FOLLOWING WHITE BOUNDARY'
+
+        cv2.putText(
+            roi,
+            f"error: {state['error']:+.3f}",
+            (20, roi_h - 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            roi,
+            f"cmd x:{cmd.linear.x:.2f} z:{cmd.angular.z:.2f}",
+            (20, roi_h - 65),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            roi,
+            f"orange: {state['orange_area_ratio']:.3f}",
+            (20, roi_h - 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            roi,
+            status,
+            (20, roi_h - 15),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (0, 255, 0) if status == 'FOLLOWING WHITE BOUNDARY' else (0, 0, 255),
+            2
+        )
+
+        frame[state['roi_y1']:state['roi_y2'], :] = roi
+
+        try:
+            debug_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+            self.debug_pub.publish(debug_msg)
+        except Exception as e:
+            self.get_logger().warn(f'Debug image publish failed: {e}')
+
+        if self.get_parameter('show_debug_windows').value:
+            cv2.imshow('lane_debug', frame)
+            cv2.waitKey(1)
+
+    def warn_throttle(self, key, message, interval):
+        now = time.time()
+        last = self.last_warn_times.get(key, 0.0)
+
+        if now - last > interval:
+            self.get_logger().warn(message)
+            self.last_warn_times[key] = now
+
+    def stop_robot(self):
+        self.cmd_pub.publish(Twist())
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = LaneDetectorNode()
+    node = LaneFollower()
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-
-    if node.get_parameter('show_debug_windows').value:
-        cv2.destroyAllWindows()
-
-    node.destroy_node()
-    rclpy.shutdown()
+    finally:
+        node.stop_robot()
+        if node.get_parameter('show_debug_windows').value:
+            cv2.destroyAllWindows()
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
