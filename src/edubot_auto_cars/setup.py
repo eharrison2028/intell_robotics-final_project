@@ -24,9 +24,10 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'lane_detector_threshold = edubot_auto_cars.lane_detector_threshold:main',
             'navigation = edubot_auto_cars.navigation:main',
-            'mapping = edubot_auto_cars.mapping:main'
+            'lane_detector_threshold = edubot_auto_cars.lane_detector_threshold:main',
+            'mapping = edubot_auto_cars.mapping:main',
+            'cone_marker_yolo = edubot_auto_cars.cone_marker_yolo:main',
         ],
     },
 )
